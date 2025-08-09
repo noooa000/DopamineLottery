@@ -5,7 +5,7 @@ a = Analysis(
     ['DopamineLottery.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon2.ico', '.'), ('cheer.wav', '.'), ('chances.txt', '.'), ('last_app.txt', '.')],
+    datas=[('icon2.ico', '.'), ('cheer.wav', '.'), ('cat.wav', '.'), ('chances.txt', '.'), ('last_app.txt', '.'), ('progress.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
