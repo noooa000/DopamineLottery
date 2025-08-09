@@ -67,7 +67,7 @@ chance_label = tk.Label(root, text="", font=("Helvetica", 16))
 chance_label.pack(pady=10)
 
 # Tracked time label
-tracked_time_label = tk.Label(root, text="Tracked Time: 00:00", fg="green", font=("Helvetica", 14))  # ★ CHANGED
+tracked_time_label = tk.Label(root, text="Tracked Time: 00:00:00", fg="green", font=("Helvetica", 14))
 tracked_time_label.pack(pady=5)
 
 # Currently tracked app
@@ -160,45 +160,43 @@ def update_chance_label():
     current = load_chances()
     chance_label.config(text=f"Chances Left: {current}")
 
+def show_lottery_popup(text, *, ms=3000, sound=None, title="🎲 Lottery Result"):
+    popup = tk.Toplevel(root)
+    popup.title(title)
+    popup.geometry("400x200")
+    popup.resizable(False, False)
+
+    # center relative to main window
+    popup_x = root.winfo_x() + (root.winfo_width() // 2) - 200
+    popup_y = root.winfo_y() + (root.winfo_height() // 2) - 100
+    popup.geometry(f"+{popup_x}+{popup_y}")
+
+    tk.Label(popup, text=text, font=("Helvetica", 14), justify="center").pack(expand=True)
+    popup.after(ms, popup.destroy)
+
+    if sound:
+        threading.Thread(target=sound, daemon=True).start()
+
+
 def run_lottery():
     if not use_chance():
-        result_label.config(text="❌ No lottery chances left!")
+        show_lottery_popup("❌ No lottery chances left!", ms=3000, sound=play_fail_sound)
         return
 
     play_click_sound()
     roll = random.random()
 
-    popup = tk.Toplevel(root)
-    popup.title("🎲 Lottery Result")
-    popup.geometry("300x180")
-    popup.resizable(False, False)
-
-    # Center popup on screen
-    popup_x = root.winfo_x() + (root.winfo_width() // 2) - 150
-    popup_y = root.winfo_y() + (root.winfo_height() // 2) - 90
-    popup.geometry(f"+{popup_x}+{popup_y}")
-
-    result = ""
-    sound_func = None
-
     if roll < 0.49:
         prize = random.randint(1, 20)
-        result = f"You won ${prize}!"
-        sound_func = play_win_sound
+        msg, snd, dur = f"You won ${prize}!", play_win_sound, 3000
     elif roll < 0.51:
-        result = "🎉 Jackpot!\nYou won 100% of the prize!\n($100)"
-        sound_func = play_jackpot_sound
+        msg, snd, dur = "🎉 Jackpot!\nYou won 100% of the prize!\n($100)", play_jackpot_sound, 30000
     else:
-        result = "Keep working!"
-        sound_func = play_fail_sound
+        msg, snd, dur = "Keep working!", play_fail_sound, 3000
 
-    label = tk.Label(popup, text=result, font=("Helvetica", 14), justify="center")
-    label.pack(expand=True)
-
-    popup.after(30000, popup.destroy)  # Auto close after 30s
-    threading.Thread(target=sound_func, daemon=True).start()
-
+    show_lottery_popup(msg, ms=dur, sound=snd)
     update_chance_label()
+
 
 def run_lottery_10x():
     def run_all():
@@ -393,7 +391,7 @@ def stop_tracking():
     winsound.PlaySound(None, winsound.SND_PURGE)  # stop any async sound
 
     tracking_label.config(text="Tracking: None", fg="gray")
-    tracked_time_label.config(text="Tracked Time: 00:00")
+    tracked_time_label.config(text="Tracked Time: 00:00:00")
     icon_label.config(image=""); icon_label.image = None
 
     if pause_button.winfo_ismapped(): pause_button.pack_forget()

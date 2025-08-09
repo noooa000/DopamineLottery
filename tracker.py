@@ -52,9 +52,12 @@ def _save_progress(exe_name: str, seconds: int) -> None:
         pass
 
 # ---------------- helpers ----------------
-def _fmt_mmss(total_seconds: int) -> str:              # ★ zero-padded MM:SS
-    m, s = divmod(max(total_seconds, 0), 60)
-    return f"{m:02d}:{s:02d}"
+def _fmt_hhmmss(seconds):
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
 
 def _play_cat_sound():
     wav_path = os.path.join(os.path.dirname(__file__), "cat.wav")
@@ -84,8 +87,8 @@ def track_process(target_process, time_label, is_paused_func, cheer_callback,
         if running:
             tracked_time += 1
             total_tracked_time += 1
-            mmss = _fmt_mmss(total_tracked_time)
-            time_label.after(0, lambda t=mmss: time_label.config(text=f"Tracked Time: {t}"))
+            hhmmss = _fmt_hhmmss(total_tracked_time)
+            time_label.after(0, lambda t=hhmmss: time_label.config(text=f"Tracked Time: {t}"))
 
             while tracked_time >= time_required:
                 tracked_time -= time_required
