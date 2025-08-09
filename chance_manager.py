@@ -1,4 +1,7 @@
-CHANCE_FILE = "chances.txt"
+import os
+
+CHANCE_FILE = os.path.join(os.path.dirname(__file__), "chances.txt")
+
 
 def load_chances():
     try:

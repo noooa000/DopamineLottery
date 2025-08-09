@@ -134,7 +134,11 @@ def start_tracking_from_path(path):
     exe = os.path.basename(path)
     current_tracking = exe
     tracking_label.config(text=f"Tracking: {exe}", fg="green")
-    messagebox.showinfo("Tracking", f"Now tracking {exe}")
+    
+    # Short "start" sound
+    winsound.Beep(600, 150)  # frequency=1000Hz, duration=150ms
+    
+
 
     # ✅ Save path to file
     with open("last_app.txt", "w") as f:
@@ -334,7 +338,9 @@ def start_tracking():
         else:
             icon_label.config(image="", text="❓")
 
-        messagebox.showinfo("Tracking", f"Now tracking {exe}")
+        # Short "start" sound
+        winsound.Beep(600, 150)
+
 
         # Hide other buttons
         track_button.pack_forget()
@@ -463,6 +469,9 @@ def update_chance_label():
         if play_10_button.winfo_ismapped():
             play_10_button.pack_forget()
 
+def auto_refresh_chance():
+    update_chance_label()
+    root.after(5000, auto_refresh_chance)  # every 5 sec
 
 
 # ---------------- Buttons ------------------
@@ -497,6 +506,7 @@ resume_frame.pack(pady=5)
 # Init
 update_chance_label()
 resume_last_tracking()  
+auto_refresh_chance()
 
 
 root.mainloop()

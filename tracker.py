@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import time
 
-CHANCE_FILE = "chances.txt"
+CHANCE_FILE = os.path.join(os.path.dirname(__file__), "chances.txt")
 TIME_REQUIRED = 60 * 60  # 1 hour in seconds
 
 def use_chance():
@@ -46,24 +46,27 @@ def select_exe():
 
 def track_process(target_process, time_label, is_paused_func, cheer_callback):
     tracked_time = 0
-    check_interval = 5
+    check_interval = 5  # seconds
 
     while True:
         if not is_paused_func():
-            found = any(proc.name().lower() == target_process.lower() for proc in psutil.process_iter(['name']))
+            found = any(
+                proc.info.get('name','').lower() == target_process.lower()
+                for proc in psutil.process_iter(['name'])
+            )
             if found:
                 tracked_time += check_interval
                 mins = tracked_time // 60
-                # ✅ Update label safely from thread
                 time_label.after(0, lambda m=mins: time_label.config(text=f"Tracked Time: {m} min"))
                 print(f"{target_process} is running... {mins} min tracked.")
             else:
                 print(f"{target_process} not running.")
 
-            if tracked_time >= TIME_REQUIRED:
+            # ✅ Grant chances while preserving leftover time
+            while tracked_time >= TIME_REQUIRED:
                 print("🎉 You've earned 1 lottery chance!")
                 add_chance()
-                tracked_time = 0
+                tracked_time -= TIME_REQUIRED   # <-- carry over remainder, don't reset to 0
 
                 total = load_chances()
                 if total == 10:
@@ -73,3 +76,4 @@ def track_process(target_process, time_label, is_paused_func, cheer_callback):
                     time_label.after(0, lambda: time_label.config(text="🎉 1 chance added!"))
 
         time.sleep(check_interval)
+
