@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
-import os
+import os, sys
 import random
 import winsound
 from tracker import load_chances, use_chance, add_chance, track_process
@@ -12,8 +12,6 @@ import win32ui
 import win32gui
 import ctypes
 from ctypes import wintypes
-import sys
-import os
 import time
 
 
@@ -36,58 +34,106 @@ tracking_stop_event = None        # ★
 TEST_TIME_PER_CHANCE = None  # seconds
 
 
-# ---------------- UI Setup ------------------
-
+## ---------------- UI Setup ------------------
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 root = tk.Tk()
-resume_frame = tk.Frame(root)        # ★ CHANGED
-resume_frame.pack(pady=5)            # ★ CHANGED
 
-
+# window meta
 root.title("Dopamine Lottery")
 root.iconbitmap(resource_path("icon2.ico"))
 
-last_icon_tk = None
-
-# Celebration emoji label (initially hidden)
-cheer_label = tk.Label(root, text="🎉", font=("Helvetica", 36))
-
-
-# Center the window
+# center the window
 window_width = 400
-window_height = 450
+window_height = 480
 screen_width = root.winfo_screenwidth()
 screen_height = root.winfo_screenheight()
 x = int((screen_width / 2) - (window_width / 2))
 y = int((screen_height / 2) - (window_height / 2))
 root.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
+# (make sure this code runs AFTER: root = tk.Tk())
+
+BG_COLOR = "#f0f0f0"
+root.overrideredirect(True)
+
+title_bar = tk.Frame(root, bg=BG_COLOR, height=28, bd=0, relief="flat")
+title_bar.pack(fill="x", side="top")
+
+# App icon
+icon_img = Image.open(resource_path("icon2.ico")).resize((16, 16))
+icon_tk = ImageTk.PhotoImage(icon_img)
+icon_label = tk.Label(title_bar, image=icon_tk, bg=BG_COLOR)
+icon_label.pack(side="left", padx=8)
+
+# --- minimize support for overrideredirect windows ---
+def _minimize():
+    # keep position stable and allow Windows to handle minimization
+    x, y = root.winfo_x(), root.winfo_y()
+    root.overrideredirect(False)
+    root.update_idletasks()
+    root.iconify()
+    # position will be restored automatically by Windows
+
+def _on_restore(_=None):
+    # when deiconified, go frameless again
+    root.overrideredirect(True)
+    root.update_idletasks()
+
+root.bind("<Map>", _on_restore)   # called when the window is shown again
+
+
+
+# Close button
+close_btn = tk.Button(
+    title_bar, text="✕", bg=BG_COLOR, relief="flat",
+    activebackground=BG_COLOR, command=root.destroy
+)
+close_btn.pack(side="right")
+
+# Optional: drag the window by the title bar or icon
+_drag = {"x": 0, "y": 0}
+def _start_drag(e): _drag.update(x=e.x_root - root.winfo_x(), y=e.y_root - root.winfo_y())
+def _on_drag(e):   root.geometry(f"+{e.x_root - _drag['x']}+{e.y_root - _drag['y']}")
+for w in (title_bar, icon_label):
+    w.bind("<Button-1>", _start_drag)
+    w.bind("<B1-Motion>", _on_drag)
+
+
+
+# the rest of your UI goes below the title bar
+resume_frame = tk.Frame(root)
+resume_frame.pack(pady=5)
+
+# After title_bar.pack(...)
+title_bar.pack(fill="x", side="top")
+
+# Add empty space (e.g., 10px high)
+tk.Frame(root, height=30, bg=BG_COLOR).pack(fill="x")
+
+
 # Lottery chance display
 chance_label = tk.Label(root, text="", font=("Helvetica", 16))
 chance_label.pack(pady=10)
 
 # Tracked time label
-tracked_time_label = tk.Label(root, text="Tracked Time: 00:00:00", fg="green", font=("Helvetica", 14))
+tracked_time_label = tk.Label(root, text="Tracked Time: 00:00:00",
+                              fg="green", font=("Helvetica", 14))
 tracked_time_label.pack(pady=5)
 
-# Currently tracked app
-# Icon and name container
+# Currently tracked app area
 tracking_frame = tk.Frame(root)
 tracking_frame.pack(pady=5)
-
-# EXE icon
 icon_label = tk.Label(tracking_frame)
 icon_label.pack(side="left", padx=5)
-
-# EXE name
-tracking_label = tk.Label(tracking_frame, text="Tracking: None", fg="gray", font=("Helvetica", 12))
+tracking_label = tk.Label(tracking_frame, text="Tracking: None",
+                          fg="gray", font=("Helvetica", 12))
 tracking_label.pack(side="left")
-
-
-
-# Result Label
-result_label = tk.Label(root, text="", fg="blue", font=("Helvetica", 20))
-result_label.pack(pady=10)
 
 
 
@@ -159,6 +205,13 @@ def play_fail_sound():
 def update_chance_label():
     current = load_chances()
     chance_label.config(text=f"Chances Left: {current}")
+
+    if current >= 10:
+        if not play_10_button.winfo_ismapped():
+            play_10_button.pack(side="left", padx=(8, 0))   # ✅ same row, small gap
+    else:
+        if play_10_button.winfo_ismapped():
+            play_10_button.pack_forget()
 
 def show_lottery_popup(text, *, ms=3000, sound=None, title="🎲 Lottery Result"):
     popup = tk.Toplevel(root)
@@ -505,7 +558,6 @@ play_button.pack(pady=10)
 
 # Play 10x button (initially hidden, below Play Lottery button)
 play_10_button = tk.Button(root, text="10 🎲", font=("Helvetica", 14), command=run_lottery_10x)
-
 
 
 # Pause/Stop (initially hidden)

@@ -60,7 +60,7 @@ def _fmt_hhmmss(seconds):
 
 
 def _play_cat_sound():
-    wav_path = os.path.join(os.path.dirname(__file__), "cat.wav")
+    wav_path = os.path.join(os.path.dirname(__file__), "good.wav")
     if os.path.exists(wav_path):
         winsound.PlaySound(wav_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
 
