@@ -10,7 +10,6 @@ import win32api
 import win32con
 import win32ui
 import win32gui
-from PIL import Image, ImageTk
 import ctypes
 from ctypes import wintypes
 import sys
@@ -30,24 +29,25 @@ tracking_paused = False
 last_button = None
 last_label = None
 track_count = 0
+tracking_thread = None            # ★
+tracking_stop_event = None        # ★
 
-
+# ✨ EDIT: set test time per chance to 2 minutes
+TEST_TIME_PER_CHANCE = None  # seconds
 
 
 # ---------------- UI Setup ------------------
 
 
 root = tk.Tk()
-resume_frame = tk.Frame(root)
+resume_frame = tk.Frame(root)        # ★ CHANGED
+resume_frame.pack(pady=5)            # ★ CHANGED
 
 
 root.title("Dopamine Lottery")
 root.iconbitmap(resource_path("icon2.ico"))
 
 last_icon_tk = None
-
-
-
 
 # Celebration emoji label (initially hidden)
 cheer_label = tk.Label(root, text="🎉", font=("Helvetica", 36))
@@ -67,7 +67,7 @@ chance_label = tk.Label(root, text="", font=("Helvetica", 16))
 chance_label.pack(pady=10)
 
 # Tracked time label
-tracked_time_label = tk.Label(root, text="Tracked Time: 0 min", fg="green", font=("Helvetica", 14))
+tracked_time_label = tk.Label(root, text="Tracked Time: 00:00", fg="green", font=("Helvetica", 14))  # ★ CHANGED
 tracked_time_label.pack(pady=5)
 
 # Currently tracked app
@@ -121,57 +121,6 @@ def resume_last_tracking():
                     # ✅ Pack these *after* the 10x button
                     last_button.pack(pady=2)
                     last_label.pack(pady=2)
-
-
-
-def start_tracking_from_path(path):
-    global current_tracking, last_button, last_label
-
-    if last_label:
-        last_label.pack_forget()
-        last_label = None
-
-    exe = os.path.basename(path)
-    current_tracking = exe
-    tracking_label.config(text=f"Tracking: {exe}", fg="green")
-    
-    # Short "start" sound
-    winsound.Beep(600, 150)  # frequency=1000Hz, duration=150ms
-    
-
-
-    # ✅ Save path to file
-    with open("last_app.txt", "w") as f:
-        f.write(path)
-
-    # ✅ Display icon for currently tracked app
-    icon_img = extract_icon_image(path)
-    if icon_img:
-        icon_tk = ImageTk.PhotoImage(icon_img)
-        icon_label.config(image=icon_tk)
-        icon_label.image = icon_tk  # prevent GC
-    else:
-        icon_label.config(image="", text="❓")
-
-    # Hide buttons like in start_tracking
-    track_button.pack_forget()
-    play_button.pack_forget()
-    if last_button:
-        last_button.pack_forget()
-        last_button = None
-
-    # Show pause button
-    if not pause_button.winfo_ismapped():
-        pause_button.pack(pady=5)
-
-    # Start tracking thread
-    thread = threading.Thread(
-    target=track_process,
-    args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup),
-    daemon=True
-)
-
-    thread.start()
 
 
 
@@ -304,93 +253,160 @@ def run_lottery_10x():
     threading.Thread(target=run_all, daemon=True).start()
 
 
+def start_tracking_from_path(path):
+    global current_tracking, last_button, last_label
+    global tracking_thread, tracking_stop_event
 
-
-
-def start_tracking():
-    global current_tracking, last_button
-    # Hide last tracked icon and label
-    global last_label
     if last_label:
         last_label.pack_forget()
         last_label = None
 
+    exe = os.path.basename(path)
+    current_tracking = exe
+    tracking_label.config(text=f"Tracking: {exe}", fg="green")
+
+    # ✅ short "start" sound
+    winsound.Beep(600, 150)
+
+    # ✅ Save path to file
+    with open("last_app.txt", "w") as f:
+        f.write(path)
+
+    # ✅ Display icon for currently tracked app
+    icon_img = extract_icon_image(path)
+    if icon_img:
+        icon_tk = ImageTk.PhotoImage(icon_img)
+        icon_label.config(image=icon_tk)
+        icon_label.image = icon_tk  # prevent GC
+    else:
+        icon_label.config(image="", text="❓")
+
+    # Hide other buttons
+    track_button.pack_forget()
+    play_button.pack_forget()
+    if last_button:
+        last_button.pack_forget()
+        last_button = None
+
+    # Show pause/stop
+    if not pause_button.winfo_ismapped():
+        pause_button.config(text="⏸ Pause Tracking")
+        pause_button.pack(pady=5)
+    if not stop_button.winfo_ismapped():
+        stop_button.pack(pady=2)
+
+    # ✅ stop any previous tracker cleanly
+    if tracking_thread and tracking_thread.is_alive():
+        tracking_stop_event.set()
+        tracking_thread.join(timeout=2)
+
+    # ✅ start new tracker with a fresh stop event
+    tracking_stop_event = threading.Event()
+    tracking_thread = threading.Thread(
+        target=track_process,
+        args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup, TEST_TIME_PER_CHANCE, tracking_stop_event),
+        daemon=True
+    )
+    tracking_thread.start()
 
 
+
+def start_tracking():
+    global current_tracking, last_button, last_label
+    global tracking_thread, tracking_stop_event
+
+    # Hide "last tracked" UI
+    if last_label:
+        last_label.pack_forget()
+        last_label = None
 
     filepath = filedialog.askopenfilename(
         title="Select EXE to Track",
         filetypes=[("Executable Files", "*.exe")]
     )
-    if filepath:
-        exe = os.path.basename(filepath)
-        current_tracking = exe
+    if not filepath:
+        return
 
-        # Update label with name
-        tracking_label.config(text=f"Tracking: {exe}", fg="green")
+    exe = os.path.basename(filepath)
+    current_tracking = exe
+    tracking_label.config(text=f"Tracking: {exe}", fg="green")
 
-        # Update icon
-        icon_img = extract_icon_image(filepath)
-        if icon_img:
-            icon_tk = ImageTk.PhotoImage(icon_img)
-            icon_label.config(image=icon_tk)
-            icon_label.image = icon_tk  # Prevent GC
-        else:
-            icon_label.config(image="", text="❓")
+    # Update icon
+    icon_img = extract_icon_image(filepath)
+    if icon_img:
+        icon_tk = ImageTk.PhotoImage(icon_img)
+        icon_label.config(image=icon_tk)
+        icon_label.image = icon_tk
+    else:
+        icon_label.config(image="", text="❓")
 
-        # Short "start" sound
-        winsound.Beep(600, 150)
+    # short "start" sound
+    winsound.Beep(600, 150)
 
+    # Hide buttons we don't need while tracking
+    track_button.pack_forget()
+    play_button.pack_forget()
+    if last_button:
+        last_button.pack_forget()
+        last_button = None
 
-        # Hide other buttons
-        track_button.pack_forget()
-        play_button.pack_forget()
+    # Show pause/stop buttons
+    if not pause_button.winfo_ismapped():
+        pause_button.config(text="⏸ Pause Tracking")
+        pause_button.pack(pady=5)
+    if not stop_button.winfo_ismapped():
+        stop_button.pack(pady=2)
 
-        # Hide last tracked app button if shown
-        if last_button:
-            last_button.pack_forget()
-            last_button = None
+    # Save last app path
+    with open("last_app.txt", "w") as f:
+        f.write(filepath)
 
-        # Show pause button
-        if not pause_button.winfo_ismapped():
-            pause_button.pack(pady=5)
+    # 🔴 stop any previous tracking thread cleanly
+    if tracking_thread and tracking_thread.is_alive():
+        tracking_stop_event.set()
+        tracking_thread.join(timeout=2)
 
-        # Start tracking thread
-        thread = threading.Thread(
-            target=track_process,
-            args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup),
-            daemon=True
-            )
-
-        thread.start()
-
-        # ✅ Save last app path
-        with open("last_app.txt", "w") as f:
-            f.write(filepath)
+    # 🟢 start a fresh tracking thread with a NEW stop event
+    tracking_stop_event = threading.Event()
+    tracking_thread = threading.Thread(
+        target=track_process,
+        args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup, TEST_TIME_PER_CHANCE, tracking_stop_event),
+        daemon=True
+    )
+    tracking_thread.start()
 
 
 
 def stop_tracking():
     global tracking_paused, current_tracking
+    global tracking_thread, tracking_stop_event
+
     tracking_paused = False
     current_tracking = None
+
+    if tracking_stop_event:
+        tracking_stop_event.set()
+    if tracking_thread:
+        tracking_thread.join(timeout=2)
+    tracking_thread = None
+
+    winsound.PlaySound(None, winsound.SND_PURGE)  # stop any async sound
+
     tracking_label.config(text="Tracking: None", fg="gray")
-    tracked_time_label.config(text="Tracked Time: 0 min")
-    icon_label.config(image="")
-    icon_label.image = None
+    tracked_time_label.config(text="Tracked Time: 00:00")
+    icon_label.config(image=""); icon_label.image = None
 
-    if pause_button.winfo_ismapped():
-        pause_button.pack_forget()
-    if stop_button.winfo_ismapped():
-        stop_button.pack_forget()
-
+    if pause_button.winfo_ismapped(): pause_button.pack_forget()
+    if stop_button.winfo_ismapped(): stop_button.pack_forget()
     track_button.pack(pady=20)
     play_button.pack(pady=10)
-
-    # Call resume after Play button and Track button are shown
     root.after(100, resume_last_tracking)
 
-    
+
+def on_close():
+    stop_tracking()
+    root.destroy()
+
 
 def show_cheer_popup():
     popup = tk.Toplevel(root)
@@ -508,5 +524,5 @@ update_chance_label()
 resume_last_tracking()  
 auto_refresh_chance()
 
-
+root.protocol("WM_DELETE_WINDOW", on_close)
 root.mainloop()
