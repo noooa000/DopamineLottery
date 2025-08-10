@@ -1,18 +1,28 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox
-import threading
-import os, sys
-import random
-import winsound
-from tracker import load_chances, use_chance, add_chance, track_process
-from PIL import Image, ImageTk
-import win32api
-import win32con
-import win32ui
-import win32gui
-import ctypes
+import os, sys, random, threading, winsound, time, json, ctypes
 from ctypes import wintypes
-import time
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from PIL import Image, ImageTk
+import win32api, win32con, win32ui, win32gui
+from tracker import load_chances, use_chance, add_chance, track_process
+
+
+DATA_FILE = "app_data.json"
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+def save_data(updates: dict):
+    data = load_data()
+    data.update(updates)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def resource_path(relative_path):
@@ -31,7 +41,8 @@ tracking_thread = None            # ★
 tracking_stop_event = None        # ★
 
 # ✨ EDIT: set test time per chance to 2 minutes
-TEST_TIME_PER_CHANCE = None  # seconds
+TEST_TIME_PER_CHANCE = 120      # None ,seconds
+ROLLS_PER_MULTI = load_data().get("rolls_per_multi", 8)
 
 
 ## ---------------- UI Setup ------------------
@@ -88,13 +99,54 @@ def _on_restore(_=None):
 root.bind("<Map>", _on_restore)   # called when the window is shown again
 
 
-
 # Close button
 close_btn = tk.Button(
     title_bar, text="✕", bg=BG_COLOR, relief="flat",
     activebackground=BG_COLOR, command=root.destroy
 )
 close_btn.pack(side="right")
+
+# Settings (gear) in the title bar
+def _apply_rolls(n: int):
+    global ROLLS_PER_MULTI, tracking_thread, tracking_stop_event, tracking_paused
+    ROLLS_PER_MULTI = n
+    save_data({"rolls_per_multi": n})   # <-- persist choice
+    # keep the button label and visibility in sync
+    play_10_button.config(text=f"{ROLLS_PER_MULTI} 🎲")
+    update_chance_label()
+
+    # If you're currently tracking, restart the tracker so the new rolls_per_multi applies
+    if current_tracking:
+        try:
+            if tracking_thread and tracking_thread.is_alive():
+                tracking_stop_event.set()
+                tracking_thread.join(timeout=2)
+        except Exception:
+            pass
+        tracking_stop_event = threading.Event()
+        tracking_paused = False
+        tracking_thread = threading.Thread(
+            target=track_process,
+            args=(current_tracking, tracked_time_label, lambda: tracking_paused, show_cheer_popup),
+            kwargs=dict(
+                rolls_per_multi=ROLLS_PER_MULTI,
+                time_required=TEST_TIME_PER_CHANCE,
+                stop_event=tracking_stop_event
+            ),
+            daemon=True
+        )
+        tracking_thread.start()
+
+settings_mb = tk.Menubutton(title_bar, text="⚙", bg=BG_COLOR,
+                            relief="flat", activebackground=BG_COLOR)
+m = tk.Menu(settings_mb, tearoff=0)
+m.add_command(label="Relax (6)",   command=lambda: _apply_rolls(6))
+m.add_command(label="Normal (8)",  command=lambda: _apply_rolls(8))
+m.add_command(label="十连 (10)",    command=lambda: _apply_rolls(10))
+settings_mb.config(menu=m)
+settings_mb.pack(side="right", padx=(0, 4))  # to the left of the close button
+
+
 
 # Optional: drag the window by the title bar or icon
 _drag = {"x": 0, "y": 0}
@@ -153,20 +205,19 @@ def resume_last_tracking():
  
 
     # Load last tracked app
-    if os.path.exists("last_app.txt"):
-        with open("last_app.txt", "r") as f:
-            path = f.read().strip()
-            if os.path.exists(path):
-                exe = os.path.basename(path)
-                icon_img = extract_icon_image(path)
-                if icon_img:
-                    last_icon_tk = ImageTk.PhotoImage(icon_img)
-                    last_button = tk.Button(resume_frame, image=last_icon_tk, command=lambda: start_tracking_from_path(path))
-                    last_label = tk.Label(resume_frame, text=f"Last tracked: {exe}", font=("Helvetica", 12))
+    data = load_data()
+    path = data.get("last_app")
+    if path and os.path.exists(path):
+        exe = os.path.basename(path)
+        icon_img = extract_icon_image(path)
+        if icon_img:
+            last_icon_tk = ImageTk.PhotoImage(icon_img)
+            last_button = tk.Button(resume_frame, image=last_icon_tk,
+                                    command=lambda p=path: start_tracking_from_path(p))
+            last_label  = tk.Label(resume_frame, text=f"Last tracked: {exe}", font=("Helvetica", 12))
+            last_button.pack(pady=2)
+            last_label.pack(pady=2)
 
-                    # ✅ Pack these *after* the 10x button
-                    last_button.pack(pady=2)
-                    last_label.pack(pady=2)
 
 
 
@@ -206,9 +257,13 @@ def update_chance_label():
     current = load_chances()
     chance_label.config(text=f"Chances Left: {current}")
 
-    if current >= 10:
+    # Update the multi-roll button label
+    play_10_button.config(text=f"{ROLLS_PER_MULTI} 🎲")
+
+    # Show only when we have enough chances
+    if current >= ROLLS_PER_MULTI:
         if not play_10_button.winfo_ismapped():
-            play_10_button.pack(side="left", padx=(8, 0))   # ✅ same row, small gap
+            play_10_button.pack(after=play_button, pady=2)
     else:
         if play_10_button.winfo_ismapped():
             play_10_button.pack_forget()
@@ -255,7 +310,7 @@ def run_lottery_10x():
     def run_all():
         results = []
         popup = tk.Toplevel(root)
-        popup.title("🎲 10x Lottery Results")
+        popup.title(f"🎲 {ROLLS_PER_MULTI}x Lottery Results")
         popup.geometry("400x200")
         popup.resizable(False, False)
 
@@ -268,7 +323,7 @@ def run_lottery_10x():
         label.pack(expand=True, fill="both")
 
         def show_next_result(index):
-            if index >= 10 or index >= load_chances() + len(results):
+            if index >= ROLLS_PER_MULTI or index >= load_chances() + len(results):
                 # Show all results together after finishing
                 summary = "\n".join(results)
                 label.config(text=summary, font=("Helvetica", 12), justify="left")
@@ -303,10 +358,17 @@ def run_lottery_10x():
 
     threading.Thread(target=run_all, daemon=True).start()
 
+def on_close():
+    try:
+        play_10_button.config(state="normal")
+    except Exception:
+        pass
+    stop_tracking()
+    root.destroy()
 
 def start_tracking_from_path(path):
     global current_tracking, last_button, last_label
-    global tracking_thread, tracking_stop_event
+    global tracking_thread, tracking_stop_event, tracking_paused
 
     if last_label:
         last_label.pack_forget()
@@ -316,19 +378,17 @@ def start_tracking_from_path(path):
     current_tracking = exe
     tracking_label.config(text=f"Tracking: {exe}", fg="green")
 
-    # ✅ short "start" sound
     winsound.Beep(600, 150)
 
-    # ✅ Save path to file
-    with open("last_app.txt", "w") as f:
-        f.write(path)
+    # ✅ Save the selected path correctly
+    save_data({"last_app": path})
 
-    # ✅ Display icon for currently tracked app
+    # Show icon
     icon_img = extract_icon_image(path)
     if icon_img:
         icon_tk = ImageTk.PhotoImage(icon_img)
         icon_label.config(image=icon_tk)
-        icon_label.image = icon_tk  # prevent GC
+        icon_label.image = icon_tk
     else:
         icon_label.config(image="", text="❓")
 
@@ -346,25 +406,32 @@ def start_tracking_from_path(path):
     if not stop_button.winfo_ismapped():
         stop_button.pack(pady=2)
 
-    # ✅ stop any previous tracker cleanly
+    # Stop previous tracker cleanly
     if tracking_thread and tracking_thread.is_alive():
         tracking_stop_event.set()
         tracking_thread.join(timeout=2)
 
-    # ✅ start new tracker with a fresh stop event
+    # Start new tracker
     tracking_stop_event = threading.Event()
+    tracking_paused = False
     tracking_thread = threading.Thread(
         target=track_process,
-        args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup, TEST_TIME_PER_CHANCE, tracking_stop_event),
+        args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup),
+        kwargs=dict(
+            rolls_per_multi=ROLLS_PER_MULTI,
+            time_required=TEST_TIME_PER_CHANCE,
+            stop_event=tracking_stop_event
+        ),
         daemon=True
     )
     tracking_thread.start()
 
 
 
+
 def start_tracking():
     global current_tracking, last_button, last_label
-    global tracking_thread, tracking_stop_event
+    global tracking_thread, tracking_stop_event, tracking_paused
 
     # Hide "last tracked" UI
     if last_label:
@@ -391,37 +458,39 @@ def start_tracking():
     else:
         icon_label.config(image="", text="❓")
 
-    # short "start" sound
     winsound.Beep(600, 150)
 
-    # Hide buttons we don't need while tracking
     track_button.pack_forget()
     play_button.pack_forget()
     if last_button:
         last_button.pack_forget()
         last_button = None
 
-    # Show pause/stop buttons
     if not pause_button.winfo_ismapped():
         pause_button.config(text="⏸ Pause Tracking")
         pause_button.pack(pady=5)
     if not stop_button.winfo_ismapped():
         stop_button.pack(pady=2)
 
-    # Save last app path
-    with open("last_app.txt", "w") as f:
-        f.write(filepath)
+    # save last app
+    save_data({"last_app": filepath})  # or path
 
-    # 🔴 stop any previous tracking thread cleanly
+    # stop previous thread
     if tracking_thread and tracking_thread.is_alive():
         tracking_stop_event.set()
         tracking_thread.join(timeout=2)
 
-    # 🟢 start a fresh tracking thread with a NEW stop event
+    # fresh stop event + start new tracker
     tracking_stop_event = threading.Event()
+    tracking_paused = False
     tracking_thread = threading.Thread(
         target=track_process,
-        args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup, TEST_TIME_PER_CHANCE, tracking_stop_event),
+        args=(exe, tracked_time_label, lambda: tracking_paused, show_cheer_popup),
+        kwargs=dict(
+            rolls_per_multi=ROLLS_PER_MULTI,
+            time_required=TEST_TIME_PER_CHANCE,
+            stop_event=tracking_stop_event
+        ),
         daemon=True
     )
     tracking_thread.start()
@@ -454,9 +523,6 @@ def stop_tracking():
     root.after(100, resume_last_tracking)
 
 
-def on_close():
-    stop_tracking()
-    root.destroy()
 
 
 def show_cheer_popup():
@@ -524,17 +590,6 @@ def extract_icon_image(exe_path):
         return img
     return None
 
-def update_chance_label():
-    current = load_chances()
-    chance_label.config(text=f"Chances Left: {current}")
-
-    # Show or hide the 10x button based on chances
-    if current >= 10:
-        if not play_10_button.winfo_ismapped():
-            play_10_button.pack(after=play_button, pady=2)
-    else:
-        if play_10_button.winfo_ismapped():
-            play_10_button.pack_forget()
 
 def auto_refresh_chance():
     update_chance_label()
@@ -544,12 +599,12 @@ def auto_refresh_chance():
 # ---------------- Buttons ------------------
 
 
-
+# Add vertical space before the first button
+tk.Frame(root, height=1, bg=BG_COLOR).pack()
 
 # Track app button
 track_button = tk.Button(root, text="🎯 Select App to Track", command=start_tracking, font=("Helvetica", 14))
 track_button.pack(pady=20)
-
 
 # Play button
 play_button = tk.Button(root, text="🎲 Play Lottery", command=run_lottery, font=("Helvetica", 18))
@@ -557,7 +612,7 @@ play_button.pack(pady=10)
 
 
 # Play 10x button (initially hidden, below Play Lottery button)
-play_10_button = tk.Button(root, text="10 🎲", font=("Helvetica", 14), command=run_lottery_10x)
+play_10_button = tk.Button(root, text=f"{ROLLS_PER_MULTI} 🎲", font=("Helvetica", 14), command=run_lottery_10x)
 
 
 # Pause/Stop (initially hidden)

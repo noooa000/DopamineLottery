@@ -1,0 +1,9 @@
+{
+  "rolls_per_multi": 10,
+  "chances": 8,
+  "progress": {
+    "chrome.exe": 112,
+    "Photoshop.exe": 85
+  },
+  "last_app": "B:/Program Files (x86)/Adobe/Adobe Photoshop 2021/Photoshop.exe"
+}
