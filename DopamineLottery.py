@@ -27,7 +27,7 @@ tracking_thread = None            # ★ unchanged comment retained
 tracking_stop_event = None        # ★ unchanged comment retained
 
 # 🎇 TEST
-TEST_TIME_PER_CHANCE = 60  # None seconds (kept as is)
+TEST_TIME_PER_CHANCE = None  #  seconds (kept as is)
 
 
 SETTINGS_FILE = "settings.txt"  # plain text persistence only
